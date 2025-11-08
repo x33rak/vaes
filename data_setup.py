@@ -8,11 +8,9 @@ import torch
 
 NUM_WORKERS = os.cpu_count()
 
+
 class AganDataset(Dataset):
     def __init__(self, targ_dir: str, transform=None, seed=42):
-        # first = Path(targ_dir)
-        # next_one = first.glob("data/*")
-        # next_two = list(next_one)
         data_ext = list(Path(targ_dir).glob("data/*"))[0].suffix
         gt_ext = list(Path(targ_dir).glob("gt/*"))[0].suffix
         
@@ -66,10 +64,10 @@ def create_dataloader(train_dir: str,
     ])
 
     # Instantiate Dataset and DataLoader
-    train_dataset = AganDataset(targ_dir = train_dir,
-                                transform = train_transform)
-    test_dataset = AganDataset(targ_dir = test_dir,
-                               transform = test_transform)
+    train_dataset = AganDataset(targ_dir=train_dir,
+                                transform=train_transform)
+    test_dataset = AganDataset(targ_dir=test_dir,
+                               transform=test_transform)
 
     train_dataloader = DataLoader(dataset=train_dataset,
                                   batch_size=train_batch_size,

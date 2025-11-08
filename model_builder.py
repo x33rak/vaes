@@ -1,16 +1,16 @@
 import torch
 from torch import nn
-from torch.functional import F
+import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 class VisualAttentionNet(nn.Module):
-    def __init__(self, in_channels=3, hidden_channels=32, iteration=5, use_checkpoint=True):
+    def __init__(self, in_channels=3, hidden_channels=32, iteration=4, use_checkpoint=True):
         super(VisualAttentionNet, self).__init__()
         self.iteration = iteration
         self.hidden_channels = hidden_channels
         self.use_checkpoint = use_checkpoint
 
-        # Deterministic convoutional refinement layers
+        # Deterministic convolutional refinement layers
         self.det_conv0 = nn.Conv2d(in_channels + 1, 32, kernel_size=3, padding=1)
         self.det_conv1 = nn.Conv2d(32, 32, kernel_size=3, padding=1)
         self.det_conv2 = nn.Conv2d(32, 32, kernel_size=3, padding=1)
@@ -75,17 +75,17 @@ class VisualAttentionNet(nn.Module):
 
 
 class SkipVAE(nn.Module):
-    def __init__(self, latent_dim=256):
+    def __init__(self, iteration=4, latent_dim=256):
         super().__init__()
+        self.iteration = iteration
         self.latent_dim = latent_dim
-        self.iteration = 2
         self.mask_list = []
 
         ### Visual Attnetion Mask ###
         self.attnMask = VisualAttentionNet(in_channels=3, hidden_channels=32, iteration=self.iteration)
 
         ### Encoder ###
-        # input channels: 3 from X [B, C, H, W]
+        # input channels: 3 from X [B, 3, H, W] + 1 from Mask [B, 1, H, W]
         self.encoder = nn.Sequential(
             nn.Conv2d(4, 16, 4, 2, 1), nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(16, 32, 4, 2, 1), nn.BatchNorm2d(32), nn.LeakyReLU(0.2, inplace=True),
@@ -157,5 +157,3 @@ class SkipVAE(nn.Module):
         y_hat = h
 
         return y_hat, mu, logvar, mask
-
-
