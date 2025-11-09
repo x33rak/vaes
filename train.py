@@ -16,7 +16,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # set hyperparameters
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=42, help="seed value for experiment replication")
-parser.add_argument("--epochs", type=int, default=200, help="number of training epochs")
+parser.add_argument("--epochs", type=int, default=1000, help="number of training epochs")
 parser.add_argument("--beta_max", type=float, default=1.5, help="max value for beta in beta-vae")
 parser.add_argument("--beta_warmup_epochs", type=int, default=100, help="warmup epochs for beta")
 parser.add_argument("--train_data_path", type=str, default="./datasets/agan/train/",
@@ -60,7 +60,6 @@ train_dataloader, test_dataloader = create_dataloader(TRAIN_DATA_PATH,
                                                       test_batch_size=TEST_BATCH_SIZE)
 
 model = SkipVAE().to(device)  # define vae model
-weights_init(model)
 vgg_model = VGGPerceptualLoss().to(device)  # define perceptual model
 vae_loss_fn = VAELoss(perceptual_model=vgg_model).to(device)  # define loss function
 
