@@ -7,15 +7,19 @@ from data_setup import create_dataloader
 from model_builder import SkipVAE
 from loss.perceptual import VGGPerceptualLoss
 from loss.vae_loss import VAELoss
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingWarmRestarts
 from utils import *
 
 # device agnostic code setup
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
 
 # set hyperparameters
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=42, help="seed value for experiment replication")
+parser.add_argument("--optimizer_name", type=str, default="adam",
+                    help="e.g. adam, adamW, RMSprop, SGD")
+parser.add_argument("--scheduler_name", type=str, default="reduce",
+                    help="e.g. reduce, cosine")
 parser.add_argument("--epochs", type=int, default=1000, help="number of training epochs")
 parser.add_argument("--beta_max", type=float, default=1.5, help="max value for beta in beta-vae")
 parser.add_argument("--beta_warmup_epochs", type=int, default=100, help="warmup epochs for beta")
@@ -31,18 +35,18 @@ parser.add_argument("--log_save_path", type=str, default="./logs", help="str pat
 opt = parser.parse_args()
 
 # seed for replication
-def seed_everything(seed):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
-
+# def seed_everything(seed):
+#     random.seed(seed)
+#     os.environ['PYTHONHASHSEED'] = str(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = True
+#
+# seed_everything(opt.seed)
 
 # Model parameters from argument parser
-seed_everything(opt.seed)
 EPOCHS = opt.epochs
 BETA_MAX = opt.beta_max
 BETA_WARMUP_EPOCHS = opt.beta_warmup_epochs
@@ -63,15 +67,54 @@ model = SkipVAE().to(device)  # define vae model
 vgg_model = VGGPerceptualLoss().to(device)  # define perceptual model
 vae_loss_fn = VAELoss(perceptual_model=vgg_model).to(device)  # define loss function
 
-OPTIMIZER = torch.optim.Adam(
-    params=model.parameters(),
-    lr=LR,
-    betas=(0.9, 0.999)
-)
+def select_optimizer(optimizer_selected:str):
+    optimizer = None
 
-SCHEDULER = ReduceLROnPlateau(
-    OPTIMIZER, mode="min", factor=0.5, patience=10
-)
+    if optimizer_selected == "adam":
+        optimizer = torch.optim.Adam(
+            params=model.parameters(),
+            lr=LR,
+            betas=(0.9, 0.999)
+        )
+
+    if optimizer_selected == "adamW":
+        optimizer = torch.optim.AdamW(
+            params=model.parameters(),
+            lr=LR,
+            beta=(0.9, 0.999)
+        )
+
+    if optimizer_selected == "RMSprop":
+        optimizer = torch.optim.RMSprop(
+            params=model.parameters(),
+            lr=LR
+        )
+
+    if optimizer_selected == "SGD":
+        optimizer = torch.optim.SGD(
+            params=model.parameters(),
+            lr=LR
+        )
+
+    return optimizer
+
+def select_scheduler(scheduler_select: str, optimizer: torch.optim.Optimizer):
+    scheduler = None
+
+    if scheduler_select == "reduce":
+        scheduler = ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=10
+        )
+    if scheduler_select == "cosine":
+        scheduler = CosineAnnealingWarmRestarts(
+            optimizer, T_0=50
+        )
+
+    return scheduler
+
+
+OPTIMIZER = select_optimizer(opt.optimizer_name)
+SCHEDULER = select_scheduler(opt.scheduler_name, OPTIMIZER)
 
 # Log information
 train_loss_lst, recon_term_lst, kl_term_lst = [], [], []
@@ -94,13 +137,13 @@ for epoch in range(EPOCHS):
 
         loss, recon_term, kl_term = vae_loss_fn(y_hat, y, mu, logvar)
 
-        OPTIMIZER.zero_grad()
-        loss.backward()
-        OPTIMIZER.step()
-
         train_loss += loss.item()
         recon_sum += recon_term.item()
         kl_sum += kl_term.item()
+
+        OPTIMIZER.zero_grad()
+        loss.backward()
+        OPTIMIZER.step()
 
     train_loss_per_epoch = train_loss / len(train_dataloader)
     recon_term_per_epoch = recon_sum / len(train_dataloader)
@@ -151,8 +194,8 @@ for epoch in range(EPOCHS):
     if epoch % 10 == 0:
         torch.save(model.state_dict(), f"{SAVE_PATH}/attentive_vae_epoch_{epoch}.pth")
 
-    SCHEDULER.step(test_loss)
-    early_stopping(test_loss, model)
+    SCHEDULER.step(test_loss_per_epoch)
+    early_stopping(test_loss_per_epoch, model)
 
     if early_stopping.early_stop:
         print(f"Early stopping triggered at Epoch: {epoch}!")
