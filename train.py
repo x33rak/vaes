@@ -11,18 +11,21 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingWarmResta
 from utils import *
 
 # device agnostic code setup
-device = "cuda:2" if torch.cuda.is_available() else "cpu"
+device = "cuda:1" if torch.cuda.is_available() else "cpu"
 
 # set hyperparameters
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=42, help="seed value for experiment replication")
 parser.add_argument("--optimizer_name", type=str, default="adam",
                     help="e.g. adam, adamW, RMSprop, SGD")
-parser.add_argument("--scheduler_name", type=str, default="reduce",
+parser.add_argument("--scheduler_name", type=str, default="cosine",
                     help="e.g. reduce, cosine")
-parser.add_argument("--epochs", type=int, default=1000, help="number of training epochs")
+parser.add_argument("--epochs", type=int, default=2000, help="number of training epochs")
 parser.add_argument("--beta_max", type=float, default=1.5, help="max value for beta in beta-vae")
 parser.add_argument("--beta_warmup_epochs", type=int, default=100, help="warmup epochs for beta")
+parser.add_argument("--vector_size", type=int, default=512, help="size of latent space vector")
+parser.add_argument("--distribution_type", type=str, default="gaussian",
+                    help="i.e. gaussian, gamma, laplace")
 parser.add_argument("--train_data_path", type=str, default="./datasets/agan/train/",
                     help="str path to training data folder")
 parser.add_argument("--test_data_path", type=str, default="./datasets/agan/test_a/",
@@ -30,21 +33,13 @@ parser.add_argument("--test_data_path", type=str, default="./datasets/agan/test_
 parser.add_argument("--train_batch_size", type=int, default=32, help="train batch size number")
 parser.add_argument("--test_batch_size", type=int, default=16, help="test batch size number")
 parser.add_argument("--learning_rate", type=float, default=1e-4, help="optimizer learning rate")
-parser.add_argument("--save_path", type=str, default="./weights", help="str path to weights folder")
-parser.add_argument("--log_save_path", type=str, default="./logs", help="str path to logs folder")
+parser.add_argument("--save_path", type=str, default="./weights_cosine_512", help="str path to weights folder")
+parser.add_argument("--log_save_path", type=str, default="./logs_cosine_512", help="str path to logs folder")
 opt = parser.parse_args()
 
 # seed for replication
-# def seed_everything(seed):
-#     random.seed(seed)
-#     os.environ['PYTHONHASHSEED'] = str(seed)
-#     np.random.seed(seed)
-#     torch.manual_seed(seed)
-#     torch.cuda.manual_seed(seed)
-#     torch.backends.cudnn.deterministic = True
-#     torch.backends.cudnn.benchmark = True
-#
-# seed_everything(opt.seed)
+torch.manual_seed(opt.seed)
+torch.cuda.manual_seed(opt.seed)
 
 # Model parameters from argument parser
 EPOCHS = opt.epochs
@@ -63,9 +58,9 @@ train_dataloader, test_dataloader = create_dataloader(TRAIN_DATA_PATH,
                                                       train_batch_size=TRAIN_BATCH_SIZE,
                                                       test_batch_size=TEST_BATCH_SIZE)
 
-model = SkipVAE().to(device)  # define vae model
+model = SkipVAE(latent_dim=opt.vector_size, dist_type=opt.distribution_type).to(device)  # define vae model
 vgg_model = VGGPerceptualLoss().to(device)  # define perceptual model
-vae_loss_fn = VAELoss(perceptual_model=vgg_model).to(device)  # define loss function
+vae_loss_fn = VAELoss(perceptual_model=vgg_model, dist_type=opt.distribution_type).to(device)  # define loss function
 
 def select_optimizer(optimizer_selected:str):
     optimizer = None
@@ -132,11 +127,9 @@ for epoch in range(EPOCHS):
     train_loss = 0.0
     recon_sum, kl_sum = 0.0, 0.0
     for x, y in train_dataloader:
-        x, y = x.to(device), y.to(device)
+        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
         y_hat, mu, logvar, mask = model(x)
-
         loss, recon_term, kl_term = vae_loss_fn(y_hat, y, mu, logvar)
-
         train_loss += loss.item()
         recon_sum += recon_term.item()
         kl_sum += kl_term.item()
@@ -166,7 +159,7 @@ for epoch in range(EPOCHS):
 
     with torch.inference_mode():
         for x, y in test_dataloader:
-            x, y = x.to(device), y.to(device)
+            x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
             y_hat, mu, logvar, mask = model(x)
             # Reconstruction loss - mse + perceptual + structural similarity
             recon = vae_loss_fn(y_hat, y)
@@ -183,7 +176,7 @@ for epoch in range(EPOCHS):
     logvars = torch.cat(logvars)
 
     # log/save
-    save_latents_to_pt(epoch, mus, logvars, save_dir=f"{LOG_SAVE_PATH}/latents/")
+    # save_latents_to_pt(epoch, mus, logvars, save_dir=f"{LOG_SAVE_PATH}/latents/")
     log_loss_to_csv(epoch,
                     recon_term_per_epoch,
                     kl_term_per_epoch,

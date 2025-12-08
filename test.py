@@ -13,19 +13,21 @@ import lpips
 
 
 # device agnostic code setup
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--vector_size", type=int, default=512, help="size of latent space vector")
+parser.add_argument("--distribution_type", type=str, default="gaussian",
+                    help="i.e. gaussian, gamma, laplace")
 parser.add_argument("--test_data_path", type=str, default="./datasets/agan/test_b/",
                     help="str path to test data folder")
-parser.add_argument("--weights_path", type=str, default="./weights/attentive_vae_last.pth")
+parser.add_argument("--weights_path", type=str, default="./weights_512/attentive_vae_last.pth")
 parser.add_argument("--save_path", type=str, default="./output/test_b/",
                     help="str path to save data folder")
 opt = parser.parse_args()
 
 def format_input(x:np.ndarray)->torch.Tensor:
     transform = transforms.Compose([
-        transforms.ToPILImage(),
         transforms.CenterCrop(size=(480, 480)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
@@ -38,9 +40,11 @@ def format_input(x:np.ndarray)->torch.Tensor:
     return x
 
 def format_output(x:torch.Tensor):
-    x = (x + 0.5) / 0.5 * 255
-    x = x.to(torch.uint8)
-    x = x.squeeze().permute(1,2,0).detach().cpu().numpy()
+    x = x.squeeze().permute(1,2,0).detach().cpu()
+    x = (x + 1) / 2
+    x = torch.clamp(x, 0.0, 1.0)
+    x = (x * 255).to(torch.uint8).numpy()
+    x = x.astype(np.uint8)
     return x
 
 
@@ -86,7 +90,8 @@ def LPIPS(model_clean, gt_clean, lpips_model) -> float:
 def main():
     Path(opt.save_path).mkdir(parents=True, exist_ok=True)
 
-    model = SkipVAE()  # instantiate model
+    # model = SkipVAE()  # instantiate model
+    model = SkipVAE(latent_dim=opt.vector_size, dist_type=opt.distribution_type)
     model.load_state_dict(torch.load(opt.weights_path, map_location=device))  # load weights
     model = model.to(device)  # model to traget device
     model.eval()  # put model in evaluation mode
@@ -100,8 +105,10 @@ def main():
 
     psnr_list, ssim_list, cd_list, distance_list = [], [], [], []
     for i in range(len(data_list)):
-        data, gt = cv2.imread(data_list[i], cv2.IMREAD_UNCHANGED), cv2.imread(gt_list[i], cv2.IMREAD_UNCHANGED)
-        data, gt = cv2.cvtColor(data, cv2.COLOR_BGR2RGB), cv2.cvtColor(gt, cv2.COLOR_RGB2BGR)
+        # data, gt = cv2.imread(data_list[i], cv2.IMREAD_UNCHANGED), cv2.imread(gt_list[i], cv2.IMREAD_UNCHANGED)
+        # data, gt = cv2.cvtColor(data, cv2.COLOR_BGR2RGB), cv2.cvtColor(gt, cv2.COLOR_RGB2BGR)
+        from PIL import Image
+        data, gt = Image.open(data_list[i]), Image.open(gt_list[i])
         with torch.inference_mode():
             data, gt = format_input(data), format_input(gt)
             out, _, _, mask = model(data)
@@ -113,6 +120,7 @@ def main():
 
             name = data_list[i].name
             # save model output as image files
+            out_np = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
             cv2.imwrite(opt.save_path + name, out_np)
 
             print(f"Image: {name} | PSNR: {psnr_val:.3f} | SSIM: {ssim_val:.3f} "

@@ -3,6 +3,9 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
+# device agnostic code setup
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
 class VisualAttentionNet(nn.Module):
     def __init__(self, in_channels=3, hidden_channels=32, iteration=4, use_checkpoint=True):
         super(VisualAttentionNet, self).__init__()
@@ -75,10 +78,11 @@ class VisualAttentionNet(nn.Module):
 
 
 class SkipVAE(nn.Module):
-    def __init__(self, iteration=4, latent_dim=256):
+    def __init__(self, iteration=4, latent_dim=256, dist_type="gaussian"):
         super().__init__()
         self.iteration = iteration
         self.latent_dim = latent_dim
+        self.dist_type = dist_type
         self.mask_list = []
 
         ### Visual Attnetion Mask ###
@@ -91,11 +95,11 @@ class SkipVAE(nn.Module):
             nn.Conv2d(16, 32, 4, 2, 1), nn.BatchNorm2d(32), nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(32, 64, 4, 2, 1), nn.BatchNorm2d(64), nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(64, 128, 4, 2, 1), nn.BatchNorm2d(128), nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(128, 256, 4, 2, 1), nn.BatchNorm2d(256), nn.LeakyReLU(0.2, inplace=True)
+            nn.Conv2d(128, self.latent_dim, 4, 2, 1), nn.BatchNorm2d(self.latent_dim), nn.LeakyReLU(0.2, inplace=True)
         )
 
-        self.flatten_dim = 256 * 15 * 15
-        self.fc_mu_logvar = nn.Linear(self.flatten_dim, 2 * latent_dim)
+        self.flatten_dim = self.latent_dim * 15 * 15
+        self.fc_mu_logvar = nn.Linear(self.flatten_dim, 2 * self.latent_dim)
 
         ### Feature encoder ###
         self.x_encoder = nn.Sequential(
@@ -103,13 +107,13 @@ class SkipVAE(nn.Module):
             nn.Sequential(nn.Conv2d(16, 32, 4, 2, 1), nn.BatchNorm2d(32), nn.LeakyReLU(0.2, inplace=True)),
             nn.Sequential(nn.Conv2d(32, 64, 4, 2, 1), nn.BatchNorm2d(64), nn.LeakyReLU(0.2, inplace=True)),
             nn.Sequential(nn.Conv2d(64, 128, 4, 2, 1), nn.BatchNorm2d(128), nn.LeakyReLU(0.2, inplace=True)),
-            nn.Sequential(nn.Conv2d(128, 256, 4, 2, 1), nn.BatchNorm2d(256), nn.LeakyReLU(0.2, inplace=True))
+            nn.Sequential(nn.Conv2d(128, self.latent_dim, 4, 2, 1), nn.BatchNorm2d(self.latent_dim), nn.LeakyReLU(0.2, inplace=True))
         )
 
         ### Decoder ###
-        self.fc_decode = nn.Linear(latent_dim, self.flatten_dim)
+        self.fc_decode = nn.Linear(self.latent_dim, self.flatten_dim)
         self.decoder = nn.ModuleList([
-            nn.Sequential(nn.ConvTranspose2d(256 + latent_dim, 128, 4, 2, 1), nn.BatchNorm2d(128), nn.ReLU(True)),
+            nn.Sequential(nn.ConvTranspose2d(self.latent_dim + self.latent_dim, 128, 4, 2, 1), nn.BatchNorm2d(128), nn.ReLU(True)),
             nn.Sequential(nn.ConvTranspose2d(128 + 128, 64, 4, 2, 1), nn.BatchNorm2d(64), nn.ReLU(True)),
             nn.Sequential(nn.ConvTranspose2d(64 + 64, 32, 4, 2, 1), nn.BatchNorm2d(32), nn.ReLU(True)),
             nn.Sequential(nn.ConvTranspose2d(32 + 32, 16, 4, 2, 1), nn.BatchNorm2d(16), nn.ReLU(True)),
@@ -117,9 +121,21 @@ class SkipVAE(nn.Module):
         ])
 
     def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.rand_like(std)
-        return mu + eps * std
+        if self.dist_type == "gaussian":
+            std = torch.exp(0.5 * logvar)
+            eps = torch.rand_like(std)
+            return mu + eps * std
+        elif self.dist_type == "gamma":
+            dist = torch.distributions.Gamma(mu, logvar)
+            return dist.rsample()
+        elif self.dist_type == "laplace":
+            u = torch.rand_like(mu) - 0.5 # u ~ Uniform(-0.5, 0.5)
+            return mu - logvar * torch.sign(u) * torch.log1p(-2 * torch.abs(u))
+        else: # the default distribution is a Gaussian
+            std = torch.exp(0.5 * logvar)
+            eps = torch.rand_like(std)
+            return mu + eps * std
+
 
     def forward(self, x):
         B, C, H, W = x.size()
@@ -134,6 +150,13 @@ class SkipVAE(nn.Module):
         h_flat = h.view(h.size(0), -1)  # get batch dim: h.size()[0]
         mu_logvar = self.fc_mu_logvar(h_flat)
         mu, logvar = torch.chunk(mu_logvar, 2, dim=1)  # tensor, number of chunks, along which dimension
+
+        if self.dist_type == "gamma":
+            mu = F.softplus(mu) + 1e-6
+            logvar = F.softplus(logvar) + 1e-6
+        elif self.dist_type == "laplace":
+            logvar = F.softplus(logvar) + 1e-6
+
         z = self.reparameterize(mu, logvar)  # to take derivative of a stochastic process
 
         # Skip-Connection Encoder
@@ -157,3 +180,12 @@ class SkipVAE(nn.Module):
         y_hat = h
 
         return y_hat, mu, logvar, mask
+
+def main():
+    x = torch.rand(size=(1,3,480,480)).to(device)
+    model = SkipVAE(latent_dim=512, dist_type="gaussian").to(device)  # define vae model
+    a, b, c, d = model(x)
+    print(a.shape, b.shape, c.shape, d.shape)
+
+if __name__ == "__main__":
+    main()
