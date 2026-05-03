@@ -4,14 +4,15 @@ import random
 import numpy as np
 
 from data_setup import create_dataloader
-from model_builder import SkipVAE
+# from model_builder import SkipVAE
+from model_builder2 import VAEGenerator 
 from loss.perceptual import VGGPerceptualLoss
 from loss.vae_loss import VAELoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingWarmRestarts
 from utils import *
 
 # device agnostic code setup
-device = "cuda:1" if torch.cuda.is_available() else "cpu"
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # set hyperparameters
 parser = argparse.ArgumentParser()
@@ -26,9 +27,9 @@ parser.add_argument("--beta_warmup_epochs", type=int, default=100, help="warmup 
 parser.add_argument("--vector_size", type=int, default=512, help="size of latent space vector")
 parser.add_argument("--distribution_type", type=str, default="gaussian",
                     help="i.e. gaussian, gamma, laplace")
-parser.add_argument("--train_data_path", type=str, default="./datasets/agan/train/",
+parser.add_argument("--train_data_path", type=str, default="./datasets/AGAN_DS/train/",
                     help="str path to training data folder")
-parser.add_argument("--test_data_path", type=str, default="./datasets/agan/test_a/",
+parser.add_argument("--test_data_path", type=str, default="./datasets/AGAN_DS/test_a/",
                     help="str path to validation data folder")
 parser.add_argument("--train_batch_size", type=int, default=32, help="train batch size number")
 parser.add_argument("--test_batch_size", type=int, default=16, help="test batch size number")
@@ -58,7 +59,8 @@ train_dataloader, test_dataloader = create_dataloader(TRAIN_DATA_PATH,
                                                       train_batch_size=TRAIN_BATCH_SIZE,
                                                       test_batch_size=TEST_BATCH_SIZE)
 
-model = SkipVAE(latent_dim=opt.vector_size, dist_type=opt.distribution_type).to(device)  # define vae model
+# model = SkipVAE(latent_dim=opt.vector_size, dist_type=opt.distribution_type).to(device)  # define vae model
+model = VAEGenerator(iteration=4, latent_dim=opt.vector_size).to(device)
 vgg_model = VGGPerceptualLoss().to(device)  # define perceptual model
 vae_loss_fn = VAELoss(perceptual_model=vgg_model, dist_type=opt.distribution_type).to(device)  # define loss function
 

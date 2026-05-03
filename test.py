@@ -28,11 +28,10 @@ opt = parser.parse_args()
 
 def format_input(x:np.ndarray)->torch.Tensor:
     transform = transforms.Compose([
-        transforms.CenterCrop(size=(480, 480)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5])
-    ])
+    ]) # transforms.CenterCrop(size=(480, 480)),
 
     x = transform(x)
     x = x.unsqueeze(dim=0)

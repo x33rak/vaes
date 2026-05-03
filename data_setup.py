@@ -49,19 +49,17 @@ def create_dataloader(train_dir: str,
 
     # transform train and test data
     train_transform = transforms.Compose([
-        transforms.CenterCrop(size=(480, 480)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5])
-    ])
+    ]) #transforms.CenterCrop(size=(480, 480)),
 
     test_transform = transforms.Compose([
-        transforms.CenterCrop(size=(480, 480)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5])
-    ])
+    ]) # transforms.CenterCrop(size=(480, 480)),
 
     # Instantiate Dataset and DataLoader
     train_dataset = AganDataset(targ_dir=train_dir,
