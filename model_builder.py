@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 # device agnostic code setup
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
 
 class VisualAttentionNet(nn.Module):
     def __init__(self, in_channels=3, hidden_channels=32, iteration=4, use_checkpoint=True):

@@ -49,6 +49,7 @@ def create_dataloader(train_dir: str,
 
     # transform train and test data
     train_transform = transforms.Compose([
+        transforms.Resize((480, 720)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
@@ -56,6 +57,7 @@ def create_dataloader(train_dir: str,
     ]) #transforms.CenterCrop(size=(480, 480)),
 
     test_transform = transforms.Compose([
+        transforms.Resize((480, 720)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5])

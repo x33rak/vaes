@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 
 import torch
-from model_builder import SkipVAE
+from baseline_model_builder import VAEGenerator
 from torchvision import transforms
 
 from skimage.metrics import structural_similarity as ssim
@@ -13,21 +13,22 @@ import lpips
 
 
 # device agnostic code setup
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = "cuda:2" if torch.cuda.is_available() else "cpu"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--vector_size", type=int, default=512, help="size of latent space vector")
-parser.add_argument("--distribution_type", type=str, default="gaussian",
-                    help="i.e. gaussian, gamma, laplace")
-parser.add_argument("--test_data_path", type=str, default="./datasets/agan/test_b/",
+# parser.add_argument("--distribution_type", type=str, default="gaussian",
+#                     help="i.e. gaussian, gamma, laplace")
+parser.add_argument("--test_data_path", type=str, default="./datasets/AGAN_DS/test_b/",
                     help="str path to test data folder")
-parser.add_argument("--weights_path", type=str, default="./weights_512/attentive_vae_last.pth")
+parser.add_argument("--weights_path", type=str, default="./weights_512/epoch_last.pth")
 parser.add_argument("--save_path", type=str, default="./output/test_b/",
                     help="str path to save data folder")
 opt = parser.parse_args()
 
 def format_input(x:np.ndarray)->torch.Tensor:
     transform = transforms.Compose([
+        transforms.Resize((480, 720)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5])
@@ -89,8 +90,7 @@ def LPIPS(model_clean, gt_clean, lpips_model) -> float:
 def main():
     Path(opt.save_path).mkdir(parents=True, exist_ok=True)
 
-    # model = SkipVAE()  # instantiate model
-    model = SkipVAE(latent_dim=opt.vector_size, dist_type=opt.distribution_type)
+    model = VAEGenerator(iteration=4, latent_dim=opt.vector_size)
     model.load_state_dict(torch.load(opt.weights_path, map_location=device))  # load weights
     model = model.to(device)  # model to traget device
     model.eval()  # put model in evaluation mode
@@ -110,7 +110,7 @@ def main():
         data, gt = Image.open(data_list[i]), Image.open(gt_list[i])
         with torch.inference_mode():
             data, gt = format_input(data), format_input(gt)
-            out, _, _, mask = model(data)
+            out, _, _ = model(data)
             out_np, gt_np = format_output(out), format_output(gt)
             psnr_val = PSNR(out_np, gt_np)  # Calculate PSNR
             ssim_val = ssim(out_np, gt_np, data_range=255, channel_axis=-1)  # Calculate SSIM
@@ -122,8 +122,7 @@ def main():
             out_np = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
             cv2.imwrite(opt.save_path + name, out_np)
 
-            print(f"Image: {name} | PSNR: {psnr_val:.3f} | SSIM: {ssim_val:.3f} "
-                  f"| CD: {cd_val:.3f} | Distance: {distance:.3f}")
+            print(f"Image: {name} | PSNR: {psnr_val:.3f} | SSIM: {ssim_val:.3f} | LPIPS: {distance:.3f} |") # f"| CD: {cd_val:.3f}
 
             # append each val to list
             psnr_list.append(psnr_val)
@@ -131,10 +130,10 @@ def main():
             cd_list.append(cd_val)
             distance_list.append(distance)
 
+    # Score to beat: 31.57 and 0.9203
     print(f"Average PSNR: {sum(psnr_list)/len(psnr_list):.3f} "
           f"| Average SSIM: {sum(ssim_list)/len(ssim_list):.3f} "
-          f"| Average CD: {sum(cd_list)/len(cd_list):.3f} "
-          f"| Average Distance: {sum(distance_list)/len(distance_list):.3f}")
+          f"| Average LPIPS: {sum(distance_list)/len(distance_list):.3f} ") # f"| Average CD: {sum(cd_list)/len(cd_list):.3f} "
 
 if __name__ == "__main__":
     main()

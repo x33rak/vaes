@@ -82,7 +82,7 @@ class EarlyStopping:
 def log_loss_to_csv(epoch, recon_term, kl_term, train_loss, test_loss, csv_path):
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     file_exists = os.path.isfile(csv_path)
-    with open(csv_path, mode="w", newline="") as f:
+    with open(csv_path, mode="a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(["epoch", "recon_loss", "kl_loss", "train_loss", "test_loss"])

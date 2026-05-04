@@ -4,22 +4,21 @@ import random
 import numpy as np
 
 from data_setup import create_dataloader
-# from model_builder import SkipVAE
-from model_builder2 import VAEGenerator 
+from baseline_model_builder import VAEGenerator 
 from loss.perceptual import VGGPerceptualLoss
 from loss.vae_loss import VAELoss
 from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingWarmRestarts
 from utils import *
 
 # device agnostic code setup
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = "cuda:3" if torch.cuda.is_available() else "cpu"
 
 # set hyperparameters
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, default=42, help="seed value for experiment replication")
 parser.add_argument("--optimizer_name", type=str, default="adam",
                     help="e.g. adam, adamW, RMSprop, SGD")
-parser.add_argument("--scheduler_name", type=str, default="cosine",
+parser.add_argument("--scheduler_name", type=str, default="reduce",
                     help="e.g. reduce, cosine")
 parser.add_argument("--epochs", type=int, default=2000, help="number of training epochs")
 parser.add_argument("--beta_max", type=float, default=1.5, help="max value for beta in beta-vae")
@@ -31,11 +30,11 @@ parser.add_argument("--train_data_path", type=str, default="./datasets/AGAN_DS/t
                     help="str path to training data folder")
 parser.add_argument("--test_data_path", type=str, default="./datasets/AGAN_DS/test_a/",
                     help="str path to validation data folder")
-parser.add_argument("--train_batch_size", type=int, default=32, help="train batch size number")
-parser.add_argument("--test_batch_size", type=int, default=16, help="test batch size number")
+parser.add_argument("--train_batch_size", type=int, default=8, help="train batch size number")
+parser.add_argument("--test_batch_size", type=int, default=4, help="test batch size number")
 parser.add_argument("--learning_rate", type=float, default=1e-4, help="optimizer learning rate")
-parser.add_argument("--save_path", type=str, default="./weights_cosine_512", help="str path to weights folder")
-parser.add_argument("--log_save_path", type=str, default="./logs_cosine_512", help="str path to logs folder")
+parser.add_argument("--save_path", type=str, default="./weights_512", help="str path to weights folder")
+parser.add_argument("--log_save_path", type=str, default="./logs_512", help="str path to logs folder")
 opt = parser.parse_args()
 
 # seed for replication
@@ -59,7 +58,6 @@ train_dataloader, test_dataloader = create_dataloader(TRAIN_DATA_PATH,
                                                       train_batch_size=TRAIN_BATCH_SIZE,
                                                       test_batch_size=TEST_BATCH_SIZE)
 
-# model = SkipVAE(latent_dim=opt.vector_size, dist_type=opt.distribution_type).to(device)  # define vae model
 model = VAEGenerator(iteration=4, latent_dim=opt.vector_size).to(device)
 vgg_model = VGGPerceptualLoss().to(device)  # define perceptual model
 vae_loss_fn = VAELoss(perceptual_model=vgg_model, dist_type=opt.distribution_type).to(device)  # define loss function
@@ -117,7 +115,7 @@ SCHEDULER = select_scheduler(opt.scheduler_name, OPTIMIZER)
 train_loss_lst, recon_term_lst, kl_term_lst = [], [], []
 test_loss_lst = []
 
-early_stopping = EarlyStopping(patience=10, verbose=True, path=f"{SAVE_PATH}/attentive_vae_last.pth")
+early_stopping = EarlyStopping(patience=10, verbose=True, path=f"{SAVE_PATH}/epoch_last.pth")
 for epoch in range(EPOCHS):
     # Smooth logistic beta warmup
     beta = BETA_MAX / (1 + math.exp(-10 * (epoch / BETA_WARMUP_EPOCHS - 0.5)))
@@ -129,14 +127,14 @@ for epoch in range(EPOCHS):
     train_loss = 0.0
     recon_sum, kl_sum = 0.0, 0.0
     for x, y in train_dataloader:
+        OPTIMIZER.zero_grad()
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-        y_hat, mu, logvar, mask = model(x)
+        y_hat, mu, logvar = model(x)
         loss, recon_term, kl_term = vae_loss_fn(y_hat, y, mu, logvar)
         train_loss += loss.item()
         recon_sum += recon_term.item()
         kl_sum += kl_term.item()
 
-        OPTIMIZER.zero_grad()
         loss.backward()
         OPTIMIZER.step()
 
@@ -162,7 +160,7 @@ for epoch in range(EPOCHS):
     with torch.inference_mode():
         for x, y in test_dataloader:
             x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-            y_hat, mu, logvar, mask = model(x)
+            y_hat, mu, logvar = model(x)
             # Reconstruction loss - mse + perceptual + structural similarity
             recon = vae_loss_fn(y_hat, y)
             test_loss += recon.item()
@@ -187,7 +185,7 @@ for epoch in range(EPOCHS):
                     csv_path=f"{LOG_SAVE_PATH}/loss_log.csv")
 
     if epoch % 10 == 0:
-        torch.save(model.state_dict(), f"{SAVE_PATH}/attentive_vae_epoch_{epoch}.pth")
+        torch.save(model.state_dict(), f"{SAVE_PATH}/epoch_{epoch}.pth")
 
     SCHEDULER.step(test_loss_per_epoch)
     early_stopping(test_loss_per_epoch, model)
