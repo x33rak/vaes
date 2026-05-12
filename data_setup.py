@@ -1,4 +1,5 @@
 import os
+from io import BytesIO
 from pathlib import Path
 from PIL import Image
 from typing import Tuple
@@ -7,6 +8,23 @@ from torchvision import transforms
 import torch
 
 NUM_WORKERS = os.cpu_count()
+
+
+class RandomJpegCompression:
+    def __init__(self, p: float = 0.5, quality_min: int = 70, quality_max: int = 95):
+        self.p = p
+        self.quality_min = quality_min
+        self.quality_max = quality_max
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        if torch.rand(()) >= self.p:
+            return img
+
+        quality = int(torch.randint(self.quality_min, self.quality_max + 1, (1,)).item())
+        buffer = BytesIO()
+        img.save(buffer, format="JPEG", quality=quality)
+        buffer.seek(0)
+        return Image.open(buffer).convert("RGB")
 
 
 class AganDataset(Dataset):
@@ -33,9 +51,10 @@ class AganDataset(Dataset):
         data_img, gt_img = self.load_image(index)
 
         if self.transform:
-            torch.manual_seed(self.seed)
+            seed = torch.randint(0, 2**31, (1,)).item()
+            torch.manual_seed(seed)
             data_img = self.transform(data_img)
-            torch.manual_seed(self.seed)
+            torch.manual_seed(seed)
             gt_img = self.transform(gt_img)
 
         return data_img, gt_img
@@ -45,16 +64,33 @@ def create_dataloader(train_dir: str,
                       test_dir: str,
                       train_batch_size: int,
                       test_batch_size: int,
-                      num_workers: int = NUM_WORKERS):
+                      num_workers: int = NUM_WORKERS,
+                      train_crop_size=None,
+                      jpeg_aug_prob: float = 0.0,
+                      jpeg_quality_min: int = 70,
+                      jpeg_quality_max: int = 95):
 
     # transform train and test data
-    train_transform = transforms.Compose([
+    train_transforms = [
         transforms.Resize((480, 720)),
+    ]
+    if jpeg_aug_prob > 0.0:
+        train_transforms.append(
+            RandomJpegCompression(
+                p=jpeg_aug_prob,
+                quality_min=jpeg_quality_min,
+                quality_max=jpeg_quality_max,
+            )
+        )
+    if train_crop_size is not None:
+        train_transforms.append(transforms.RandomCrop(train_crop_size))
+    train_transforms.extend([
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5])
-    ]) #transforms.CenterCrop(size=(480, 480)),
+    ])
+    train_transform = transforms.Compose(train_transforms) #transforms.CenterCrop(size=(480, 480)),
 
     test_transform = transforms.Compose([
         transforms.Resize((480, 720)),

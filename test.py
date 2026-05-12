@@ -1,11 +1,11 @@
 from pathlib import Path
 import argparse
+import importlib
 import math
 import numpy as np
 import cv2
 
 import torch
-from baseline_model_builder import VAEGenerator
 from torchvision import transforms
 
 from skimage.metrics import structural_similarity as ssim
@@ -13,18 +13,43 @@ import lpips
 
 
 # device agnostic code setup
-device = "cuda:2" if torch.cuda.is_available() else "cpu"
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--model_builder", type=str, default="model_builder_v1",
+                    help="Python module that exposes build_vae(config) or VAEGenerator")
 parser.add_argument("--vector_size", type=int, default=512, help="size of latent space vector")
+parser.add_argument("--latent_dim", type=int, default=None,
+                    help="alias for --vector_size")
+parser.add_argument("--iteration", type=int, default=4, help="attention-mask refinement iterations")
+parser.add_argument("--residual_scale", type=float, default=1.0,
+                    help="scale for residual-decoder model builders")
+parser.add_argument("--correction_scale", type=float, default=0.5,
+                    help="scale for optional refinement correction branches")
+parser.add_argument("--vq_num_embeddings", type=int, default=512,
+                    help="number of discrete latent codes for VQ-VAE builders")
+parser.add_argument("--vq_commitment_cost", type=float, default=0.25,
+                    help="commitment loss weight inside VQ-VAE builders")
+parser.add_argument("--vq_embedding_dim", type=int, default=128,
+                    help="code embedding channel count for spatial VQ-VAE builders")
+parser.add_argument("--vq_stride", type=int, default=4,
+                    help="downsampling stride for spatial VQ-VAE bottlenecks")
+parser.add_argument("--quantize_blend", type=float, default=1.0,
+                    help="blend from continuous latent to quantized latent for VQ-VAE builders")
+parser.add_argument("--mask_gate_min", type=float, default=0.75,
+                    help="minimum residual gate for mask-gated model builders")
 # parser.add_argument("--distribution_type", type=str, default="gaussian",
 #                     help="i.e. gaussian, gamma, laplace")
 parser.add_argument("--test_data_path", type=str, default="./datasets/AGAN_DS/test_b/",
                     help="str path to test data folder")
-parser.add_argument("--weights_path", type=str, default="./weights_512/epoch_last.pth")
-parser.add_argument("--save_path", type=str, default="./output/test_b/",
+parser.add_argument("--weights_path", type=str, default="./weights_v1_512/epoch_last.pth")
+parser.add_argument("--save_path", type=str, default="./output/test_b_v1/",
                     help="str path to save data folder")
+parser.add_argument("--tta_hflip", action="store_true",
+                    help="average prediction with horizontal-flip test-time augmentation")
 opt = parser.parse_args()
+if opt.latent_dim is not None:
+    opt.vector_size = opt.latent_dim
 
 def format_input(x:np.ndarray)->torch.Tensor:
     transform = transforms.Compose([
@@ -46,6 +71,11 @@ def format_output(x:torch.Tensor):
     x = (x * 255).to(torch.uint8).numpy()
     x = x.astype(np.uint8)
     return x
+
+
+def image_files(path: Path) -> list[Path]:
+    suffixes = {".jpg", ".jpeg", ".png"}
+    return sorted([p for p in path.iterdir() if p.suffix.lower() in suffixes])
 
 
 def PSNR(model_clean, gt_clean) -> float:
@@ -90,7 +120,11 @@ def LPIPS(model_clean, gt_clean, lpips_model) -> float:
 def main():
     Path(opt.save_path).mkdir(parents=True, exist_ok=True)
 
-    model = VAEGenerator(iteration=4, latent_dim=opt.vector_size)
+    module = importlib.import_module(opt.model_builder)
+    if hasattr(module, "build_vae"):
+        model = module.build_vae(vars(opt))
+    else:
+        model = module.VAEGenerator(iteration=opt.iteration, latent_dim=opt.vector_size)
     model.load_state_dict(torch.load(opt.weights_path, map_location=device))  # load weights
     model = model.to(device)  # model to traget device
     model.eval()  # put model in evaluation mode
@@ -99,8 +133,8 @@ def main():
     lpips_model = lpips.LPIPS(net='alex').to(device)
     lpips_model = lpips_model.eval()
 
-    data_list = sorted(list(Path(opt.test_data_path).glob("data/*.jpg")))
-    gt_list = sorted(list(Path(opt.test_data_path).glob("gt/*.jpg")))
+    data_list = image_files(Path(opt.test_data_path) / "data")
+    gt_list = image_files(Path(opt.test_data_path) / "gt")
 
     psnr_list, ssim_list, cd_list, distance_list = [], [], [], []
     for i in range(len(data_list)):
@@ -111,6 +145,10 @@ def main():
         with torch.inference_mode():
             data, gt = format_input(data), format_input(gt)
             out, _, _ = model(data)
+            if opt.tta_hflip:
+                flipped_data = torch.flip(data, dims=[3])
+                flipped_out, _, _ = model(flipped_data)
+                out = (out + torch.flip(flipped_out, dims=[3])) / 2.0
             out_np, gt_np = format_output(out), format_output(gt)
             psnr_val = PSNR(out_np, gt_np)  # Calculate PSNR
             ssim_val = ssim(out_np, gt_np, data_range=255, channel_axis=-1)  # Calculate SSIM
