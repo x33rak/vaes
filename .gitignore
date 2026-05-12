@@ -211,11 +211,7 @@ datasets/
 output/
 
 # weights
-weights_512/
-weights_cosine_512/
-weights_v*
+weights/
 
 # logs
-logs_cosine_512/
-logs_v*
 
