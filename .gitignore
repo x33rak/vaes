@@ -206,9 +206,11 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# dataset, weights, output images folders
+# dataset, output images
 datasets/
 output/
-weights_512/
-weights_cosine_512/
-logs_cosine_512/
+
+# weights
+weights/
+
+# logs
