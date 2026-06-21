@@ -212,3 +212,4 @@ output/
 weights_512/
 weights_cosine_512/
 logs_cosine_512/
+weights/
