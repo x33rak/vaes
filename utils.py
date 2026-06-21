@@ -2,6 +2,9 @@ import csv
 import os
 import torch
 import torch.nn.init as init
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingWarmRestarts
+from typing import Iterator
+from torch.nn import Parameter
 
 
 ### Model Utils
@@ -77,6 +80,56 @@ class EarlyStopping:
             self.trace_func(f"Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model ... ")
         torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
+
+
+# toggle optimizer
+def select_optimizer(optimizer_selected:str, model_params: Iterator[Parameter], lr: float):
+    optimizer = None
+
+    if optimizer_selected == "adam":
+        optimizer = torch.optim.Adam(
+            params=model_params,
+            lr=lr,
+            betas=(0.9, 0.999)
+        )
+
+    if optimizer_selected == "adamW":
+        optimizer = torch.optim.AdamW(
+            params=model_params,
+            lr=lr,
+            beta=(0.9, 0.999)
+        )
+
+    if optimizer_selected == "RMSprop":
+        optimizer = torch.optim.RMSprop(
+            params=model_params,
+            lr=lr,
+        )
+
+    if optimizer_selected == "SGD":
+        optimizer = torch.optim.SGD(
+            params=model_params,
+            lr=lr,
+        )
+
+    return optimizer
+
+
+# toggle scheduler
+def select_scheduler(scheduler_select: str, optimizer: torch.optim.Optimizer):
+    scheduler = None
+
+    if scheduler_select == "reduce":
+        scheduler = ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=10
+        )
+    if scheduler_select == "cosine":
+        scheduler = CosineAnnealingWarmRestarts(
+            optimizer, T_0=50
+        )
+
+    return scheduler
+
 
 ### Logging Utils
 def log_loss_to_csv(epoch, recon_term, kl_term, train_loss, test_loss, csv_path):

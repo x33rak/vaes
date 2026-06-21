@@ -17,11 +17,9 @@ device = "cuda:2" if torch.cuda.is_available() else "cpu"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--vector_size", type=int, default=512, help="size of latent space vector")
-# parser.add_argument("--distribution_type", type=str, default="gaussian",
-#                     help="i.e. gaussian, gamma, laplace")
 parser.add_argument("--test_data_path", type=str, default="./datasets/AGAN_DS/test_b/",
                     help="str path to test data folder")
-parser.add_argument("--weights_path", type=str, default="./weights_512/epoch_last.pth")
+parser.add_argument("--weights_path", type=str, default="./weights/weights_512/epoch_last.pth")
 parser.add_argument("--save_path", type=str, default="./output/test_b/",
                     help="str path to save data folder")
 opt = parser.parse_args()
@@ -32,7 +30,7 @@ def format_input(x:np.ndarray)->torch.Tensor:
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5])
-    ]) # transforms.CenterCrop(size=(480, 480)),
+    ])
 
     x = transform(x)
     x = x.unsqueeze(dim=0)
@@ -104,13 +102,11 @@ def main():
 
     psnr_list, ssim_list, cd_list, distance_list = [], [], [], []
     for i in range(len(data_list)):
-        # data, gt = cv2.imread(data_list[i], cv2.IMREAD_UNCHANGED), cv2.imread(gt_list[i], cv2.IMREAD_UNCHANGED)
-        # data, gt = cv2.cvtColor(data, cv2.COLOR_BGR2RGB), cv2.cvtColor(gt, cv2.COLOR_RGB2BGR)
         from PIL import Image
         data, gt = Image.open(data_list[i]), Image.open(gt_list[i])
         with torch.inference_mode():
             data, gt = format_input(data), format_input(gt)
-            out, _, _ = model(data)
+            out, _, _, _, _ = model(data)
             out_np, gt_np = format_output(out), format_output(gt)
             psnr_val = PSNR(out_np, gt_np)  # Calculate PSNR
             ssim_val = ssim(out_np, gt_np, data_range=255, channel_axis=-1)  # Calculate SSIM

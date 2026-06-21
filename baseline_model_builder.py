@@ -253,7 +253,7 @@ class VAEGenerator(nn.Module):
         z = self.reparameterize(mu, logvar)
         frame1, frame2, out = self.decode(z, res1, res2)
         # return mask_list, frame1, frame2, out, mu, logvar
-        return out, mu, logvar
+        return out, frame1, frame2, mu, logvar
     
 
 def main():
